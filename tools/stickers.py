@@ -10,8 +10,6 @@ from pyrogram.errors import FloodWait, RPCError
 from pyrogram.types import Message
 
 from .constants import STICKER_BOT, STICKER_IMG
-from .helpers import Parameters, delete_this
-
 
 class StickerLocker:
     """贴纸指令🔒"""
@@ -94,7 +92,7 @@ class StickerAdder:
             await self.__wait_for()
 
     async def send_emoji(self) -> None:
-        _, arg = Parameters.get(self._msg)
+        arg = self._msg.command[1]
         if emoji.is_emoji(arg):
             an_emoji = arg
         elif self._msg.reply_to_message.sticker:
@@ -150,12 +148,12 @@ class StickerAdder:
         try:
             await self.edit_text(text, parse_mode=parse_mode)
             await asyncio.sleep(3.5)
-            await delete_this(self._msg)
+            await self._msg.delete()
         except FloodWait as e:
             await asyncio.sleep(e.x)
             await self.edit_text(text, parse_mode=parse_mode)
             await asyncio.sleep(3.5)
-            await delete_this(self._msg)
+            await self._msg.delete()
         except RPCError as e:
             logger.warning(e)
 

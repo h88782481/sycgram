@@ -6,55 +6,70 @@ from loguru import logger
 from pyrogram import Client
 from pyrogram.types import Message
 from tools.constants import DOWNLOAD_PATH, SYCGRAM
-from tools.helpers import Parameters, delete_this, show_cmd_tip, show_exception
 
-
+"""
+上传文件
+"""
 @Client.on_message(command("upload"))
-async def upload(cli: Client, msg: Message):
-    """上传文件"""
-    cmd, where = Parameters.get(msg)
-    if not where:
-        return await show_cmd_tip(msg, cmd)
-    replied_msg_id = msg.reply_to_message.id \
-        if msg.reply_to_message else None
-    _, filename = os.path.split(where)
+async def upload(client: Client, message: Message):
+    
+    #判断参数数量是否正确
+    command_len = len(message.command)
+    if command_len != 2:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
+    replied_msg_id = message.reply_to_message.id if message.reply_to_message else None
+    _, filename = os.path.split(message.command[1])
+    
     try:
-        res = await cli.send_document(
-            chat_id=msg.chat.id,
-            document=where,
+        res = await client.send_document(
+            chat_id=message.chat.id,
+            document=message.command[1],
             caption=f"```From {SYCGRAM}```",
             file_name=filename,
             reply_to_message_id=replied_msg_id
         )
     except Exception as e:
-        return await show_exception(msg, e)
+        return await message.edit_text(f"发生错误: `{e}`")
     else:
         if res:
-            await delete_this(msg)
+            await message.delete()
         else:
-            await msg.edit_text("⚠️ 可能上传失败 ...")
+            await message.edit_text("⚠️ 可能上传失败 ...")
 
-
+"""
+下载目标消息的文件
+"""
 @Client.on_message(command("download"))
-async def download(_: Client, msg: Message):
-    """下载目标消息的文件"""
-    cmd, where = Parameters.get(msg)
-    replied_msg = msg.reply_to_message
-    if not replied_msg:
-        return await show_cmd_tip(msg, cmd)
+async def download(_: Client, message: Message):
+    
+    #判断参数数量是否正确
+    command_len = len(message.command)
+    if command_len > 2:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
+    #判断是否回复了一条消息
+    replied_msg = message.reply_to_message
+    if replied_msg == None:
+        await message.edit_text("你需要回复一条消息.")
+        await asyncio.sleep(2)
+        return await message.delete()
 
     try:
-        res = await replied_msg.download(
-            file_name=DOWNLOAD_PATH if not where else where)
+        res = await replied_msg.download(file_name=DOWNLOAD_PATH if not message.command[1] else message.command[1])
     except ValueError:
-        return await show_cmd_tip(msg, cmd)
+        return await message.edit_text(f"发生错误!")
     except Exception as e:
         logger.error(e)
-        return await show_exception(msg, e)
+        return await message.edit_text(f"发生错误: `{e}`")
     else:
         if res:
-            await msg.edit_text("✅ 下载成功。")
+            await message.edit_text("✅ 下载成功。")
             await asyncio.sleep(3)
-            await delete_this(msg)
+            await message.delete()
         else:
-            await msg.edit_text("⚠️ 可能下载失败 ...")
+            await message.edit_text("⚠️ 可能下载失败 ...")

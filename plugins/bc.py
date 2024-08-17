@@ -1,86 +1,116 @@
+import asyncio
 from core import command
 from pyrogram import Client
 from pyrogram.types import Message
-from tools.helpers import Parameters
-from tools.sessions import session
+from tools.sessions import get_session
 from loguru import logger
-EXCHANGE_API="https://api.exchangerate-api.com/v4/latest/{}"
-BIANCE_API="https://api.binance.com/api/v3/ticker/price?symbol={}USDT"
+from binance.spot import Spot
+from binance.error import ClientError
+from typing import Dict
+from tools.utils import convert_string_to_float
 
-async def get_from_exchanger(code):
-    resp=await session.get(EXCHANGE_API.format(code),timeout=5.5)
-    if resp.status==200:
-        data = await resp.json()
-        return data["rates"]
-    return None
+EXCHANGE_API = "https://api.exchangerate-api.com/v4/latest/usd"
 
-async def get_from_biance(coin):
-    resp=await session.get(BIANCE_API.format(coin),timeout=5.5)
-    if resp.status==200:
-        data=await resp.json()
-        # print("币安",data)
-        return float(data["price"])
-    return None
-
-@Client.on_message(command('bc'))
-async def coin(_: Client, msg: Message):
-    """_summary_
-    加密货币转换器
-    Args:
-        _ (Client): _description_
-        msg (Message): _description_
-    """
-    cmd, args = Parameters.get_more(msg)
-    num=0.0
-    if len(args) !=3:
-        fail_msg=f" 这个命令应该这样使用`{cmd} 1 xmr usdt`它将以实时汇率，将1 xmr转换为usdt。"
-        await msg.edit_text(fail_msg)
-        return 
+"""
+获取真实货币的汇率表。
+"""
+async def get_from_exchanger(session) -> Dict:
     try:
-        num=abs(float(args[0]))
-        # print("this is num",num)
-    except ValueError:
-        await msg.edit_text("你应该输入一个数字，你个傻钩子。")
-        return
-    
-    _from=args[1].upper()
-    _to=args[2].upper()
-    try:
-        rates=await get_from_exchanger("USD")
-        CNY=rates["CNY"]
-        if  _from in rates:
-            
-            from_rates=await get_from_exchanger(_from)
-            cny=num*from_rates["CNY"]
-            if _to in rates:
-                result= num * from_rates[_to]
-            else:
-                if _to=="USDT":
-                    result=num * from_rates[_to]
-                else:
-                    to_usdt=await get_from_biance(_to)
-                    result=num*from_rates["USD"]/to_usdt
-        else:
-            from_usdt=await get_from_biance(_from)
-            cny=num*from_usdt*CNY
-            if _to in rates:
-                result=num*rates[_to]*from_usdt
-            else:
-                if _to=="USDT":
-                    result=num*from_usdt
-                else:
-                    to_usdt=await get_from_biance(_to)
-                    result=num*from_usdt/to_usdt
-        currency = f"{num} {_from} = {result:.8f} {_to} = {cny} CNY \n实时汇率来自于binance"
-        await msg.edit_text(currency)
+        response = await session.get(EXCHANGE_API, timeout=5.5)
+        if response.status_code==200:
+            data = response.json()
+            return data["rates"]
+        return None
     except Exception as e:
-        logger.error(e)
-        await msg.edit_text(e)
+        logger.error(f"发生了错误：{e}")
+        return None
+      
+"""
+货币转换器
+"""
+@Client.on_message(command('bc'))
+async def coin(_: Client, message: Message):
+    
+    #判断参数数量是否正确
+    if len(message.command) != 4:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(2)
+        return await message.delete()
+    
+    session = await get_session()
+    
+    #初始化工作
+    usd_rate = await get_from_exchanger(session)
+    binance_client = Spot()
+    if usd_rate == None:
+        await message.edit_text("初始化错误,请重试,具体原因请查看log.")
+        await asyncio.sleep(2)
+        return await message.delete()
 
-"""
-data/command.yml
-bc:
-  cmd: bc
-  format: -bc num from to
-  usage: 加密货币转换
-"""
+    #判断第一个参数是否为正数
+    number = convert_string_to_float(message.command[1])
+    if number == None or number <= 0.0:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(2)
+        return await message.delete()
+
+    #获取两个货币符号
+    _from = message.command[2].upper()
+    _to = message.command[3].upper()
+    
+     #真实货币-真实货币
+    if (_from in usd_rate) and (_to in usd_rate):
+        return await message.edit((
+            f'{message.command[1]} {message.command[2].upper()} ='
+            f'{number * usd_rate[_to] / usd_rate[_from]:.2f} '
+            f'{message.command[3].upper()}'))
+        
+    #真实货币-加密货币
+    if _from in usd_rate:
+        usd_number = number / usd_rate[_from]
+        try:
+            x_usdt_data = binance_client.klines(f"{_to}USDT", "1m")[:1][0]
+        except ClientError as ce:
+            logger.error(f"发生了错误：{ce}")
+            await message.edit(f'无法获取 {_from} 到 {_to} 的汇率.')
+            await asyncio.sleep(2)
+            return await message.delete()
+        
+        return await message.edit((
+            f'{message.command[1]} **{_from}** = '
+            f'{1 / float(x_usdt_data[1]) * usd_number:.8f} **{_to}**\n'
+            f'{message.command[1]} **{_from}** = '
+            f'{usd_number:.2f} **USD**'))
+        
+    
+    #加密货币-真实货币
+    if _to in usd_rate:
+        usd_number = number * usd_rate[_to]
+        try:
+            x_usdt_data = binance_client.klines(f"{_from}USDT", "1m")[:1][0]
+        except ClientError as ce:
+            logger.error(f"发生了错误：{ce}")
+            await message.edit(f'无法获取 {_from} 到 {_to} 的汇率.')
+            await asyncio.sleep(2)
+            return await message.delete()
+        
+        return await message.edit((
+            f'{message.command[1]} **{_from}** = '
+            f'{float(x_usdt_data[1]) * usd_number:.2f} **{_to}**\n'
+            f'{message.command[1]} **{_from}** = '
+            f'{float(x_usdt_data[1]):.2f} **USD**'))
+        
+
+    #加密货币-加密货币
+    try:
+        from_to_data = binance_client.klines(f"{_from}{_to}", "1m")[:1][0]
+    except ClientError as ce:
+        logger.error(f"发生了错误：{ce}")
+        await message.edit(f'无法获取 {_from} 到 {_to} 的汇率.')
+        await asyncio.sleep(2)
+        return await message.delete()
+    
+    await message.edit((
+            f'{message.command[1]} **{_from}** = '
+            f'{float(from_to_data[1]) * number} **{_to}**\n'))
+    await logger.complete()

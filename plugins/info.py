@@ -1,18 +1,29 @@
+import asyncio
 from core import command
 from pyrogram import Client
 from pyrogram.types import Message
-from tools.helpers import get_fullname
+from tools.utils import get_fullname
 
-
+"""
+直接使用或者回复目标消息，从而获取各种IDs
+"""
 @Client.on_message(command("id"))
-async def get_id(_: Client, msg: Message):
-    """直接使用或者回复目标消息，从而获取各种IDs"""
-    text = f"消息ID: `{msg.id}`\n\n" \
-           f"群聊标题: `{msg.chat.title or msg.chat.first_name}`\n" \
-           f"群聊类型: `{msg.chat.type}`\n" \
-           f"群聊ID: `{msg.chat.id}`"
+async def get_id(_: Client, message: Message):
+       
+    #判断参数数量是否正确
+    command_len = len(message.command)
+    if command_len != 1:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(3)
+        return await message.delete()
+ 
+    text = f"消息ID: `{message.id}`\n\n" \
+           f"群聊标题: `{message.chat.title or message.chat.first_name}`\n" \
+           f"群聊类型: `{message.chat.type}`\n" \
+           f"群聊ID: `{message.chat.id}`"
 
-    replied_msg = msg.reply_to_message
+    replied_msg = message.reply_to_message
+    
     if replied_msg and replied_msg.from_user:
         user = replied_msg.from_user
         text = f"回复消息ID: `{replied_msg.id}`\n\n" \
@@ -28,4 +39,4 @@ async def get_id(_: Client, msg: Message):
                f"群聊ID: `{sender_chat.id}`\n\n" \
                f"{text}"
 
-    await msg.edit_text(text)
+    await message.edit_text(text)

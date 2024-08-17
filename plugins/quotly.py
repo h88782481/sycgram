@@ -1,59 +1,49 @@
-import requests
 import base64
 import asyncio
 from core import command
 from loguru import logger
 from pyrogram import Client
-from pyrogram.errors import RPCError
 from pyrogram.types import Message
-from tools.helpers import Parameters, delete_this
-from tools.constants import QUOTLY_API
+from tools.sessions import get_session
+from tools.utils import convert_string_to_int
 
-async def check_replied_msg(msg: Message, cmd: str) -> bool:
-    replied_msg = msg.reply_to_message
-    if not replied_msg:
-        await msg.edit_text(f"❗️ 请使用 `{cmd}` 回复一条消息。")
-        await asyncio.sleep(3)
-        await delete_this(msg)
-        return False
-    else:
-        return True
+QUOTLY_API: str = 'https://bot.lyo.su/quote/generate'
 
-async def forward_info(reply):
+async def forward_info(replied_msg: Message):
     # 判断转发来源
     # 转发自频道
-    if reply.forward_from_chat:
-        sid = reply.forward_from_chat.id
-        title = reply.forward_from_chat.title
+    if replied_msg.forward_from_chat:
+        sid = replied_msg.forward_from_chat.id
+        title = replied_msg.forward_from_chat.title
         name = title
     # 转发自用户或机器人
-    elif reply.forward_from:
-        sid = reply.forward_from.id
+    elif replied_msg.forward_from:
+        sid = replied_msg.forward_from.id
         try:
             try:
-                name = first_name = reply.forward_from.first_name
+                name = first_name = replied_msg.forward_from.first_name
             except TypeError:
                 name = '死号'
-            if reply.forward_from.last_name:
-                last_name = reply.forward_from.last_name
+            if replied_msg.forward_from.last_name:
+                last_name = replied_msg.forward_from.last_name
                 name = f'{first_name} {last_name}'
         except AttributeError:
             pass
         title = name
     # 拒绝查看转发消息来源时
-    elif reply.forward_sender_name:
-        title = name = sender_name = reply.forward_sender_name
+    elif replied_msg.forward_sender_name:
+        title = name = sender_name = replied_msg.forward_sender_name
         sid = 0
     # 不是转发的消息
-    elif reply.from_user:
+    elif replied_msg.from_user:
         try:
-            sid = reply.from_user.id
+            sid = replied_msg.from_user.id
             try:
-                name = first_name = reply.from_user.first_name
+                name = first_name = replied_msg.from_user.first_name
             except TypeError:
                 name = '死号'
-            if reply.from_user.last_name:
-                last_name = reply.from_user.last_name
+            if replied_msg.from_user.last_name:
+                last_name = replied_msg.from_user.last_name
                 name = f'{first_name} {last_name}'
         except AttributeError:
             pass
@@ -61,7 +51,22 @@ async def forward_info(reply):
     return sid,title,name
 
 @Client.on_message(command('q'))
-async def quote(_: Client, msg: Message):
+async def quote(client: Client, message: Message):
+    
+    #判断参数数量是否正确
+    command_len = len(message.command)
+    if command_len > 2:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
+    #判断是否回复了一条消息
+    replied_msg = message.reply_to_message
+    if replied_msg == None:
+        await message.edit_text("请回复一条消息.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
     json_data = {
         "type": "quote",
         "format": "webp",
@@ -71,76 +76,39 @@ async def quote(_: Client, msg: Message):
         "scale": 2,
         "messages": []
     }
-    cmd, opt = Parameters.get_more(msg)
-    # 检测是否回复一条消息
-    if not await check_replied_msg(msg, cmd):
-        return
-    # 无参数则默认为当前回复的消息
-    if not opt:
-        reply = msg.reply_to_message
-        sid, title ,name = await forward_info(reply)
-        messages_json = {
-            "entities": [],
-            "avatar": True,
-            "from": {
-                "id": sid,
-                "language_code": "zh",
-                "title": title,
-                "name": name
-            },
-            "text": reply.text
-        }
-        # Add the new message to the 'messages' array
-        json_data["messages"].append(messages_json)
-
-        # Convert the updated data back to JSON
-        # updated_json = json.dumps(json_data, indent=4)
-
-        await msg.edit('等待Lyosu语录生成返回结果...')
-        req = requests.post(QUOTLY_API, json=json_data).json()
-        if req['ok'] == True:
-            try:
-                buffer = base64.b64decode(req['result']['image'].encode('utf-8'))
-                open('Quotly.webp', 'wb').write(buffer)
-                await msg.edit("已在Lyosu生成并保存语录, 正在上传中...")
-                await msg.reply_document('Quotly.webp',force_document=False,reply_to_message_id=reply.id)
-                await delete_this(msg)
-            except:
-                await msg.edit("请求成功但出现错误❗️ ")
-                await asyncio.sleep(3)
-                await delete_this(msg)
-                return 
-            return
-    elif int(opt) == 1:
-        try:
-            num = int(opt[0]) - 1
-        except ValueError:
-            await msg.edit("❗️ 你应该输入一个数字，你个傻钩子。")
+    
+    session = await get_session()
+    num = 1
+    if command_len == 2:
+        num = convert_string_to_int(message.command[1])
+        if num == None or num < 0:
+            await message.edit_text("❗️你应该输入一个正整数.")
             await asyncio.sleep(3)
-            await delete_this(msg)
-            return 
-        reply = msg.reply_to_message
+            await message.delete()
+            return
+        
+    #将本条消息加入转换队列
+    sid, title ,name = await forward_info(replied_msg)
+    messages_json = {
+        "entities": [],
+        "avatar": True,
+        "from": {
+            "id": sid,
+            "language_code": "zh",
+            "title": title,
+            "name": name
+        },
+        "text": replied_msg.text
+    }
+    # 将要转成图片的消息加到消息列表里
+    json_data["messages"].append(messages_json)
 
-        sid, title ,name = await forward_info(reply)
-        messages_json = {
-            "entities": [],
-            "avatar": True,
-            "from": {
-                "id": sid,
-                "language_code": "zh",
-                "title": title,
-                "name": name
-            },
-            "text": reply.text
-        }
-        # Add the new message to the 'messages' array
-        json_data["messages"].append(messages_json)
-
+    if num > 1:
         messages = Client.get_chat_history(
-            reply.chat.id, 
-            limit=num,
-            offset_id=reply.id)
-        # Extract the message texts
+            client,
+            chat_id=replied_msg.chat.id, 
+            limit=num-1,
+            offset_id=replied_msg.id)
         async for msg in messages:
             sid, title ,name = await forward_info(msg)
             messages_json = {
@@ -156,30 +124,48 @@ async def quote(_: Client, msg: Message):
             }
             json_data["messages"].append(messages_json)
         json_data["messages"].reverse()
-        await msg.edit('等待Lyosu语录生成返回结果...')
-        req = requests.post(QUOTLY_API, json=json_data).json()
-        if req['ok'] == True:
-            try:
-                buffer = base64.b64decode(req['result']['image'].encode('utf-8'))
-                open('Quotly.webp', 'wb').write(buffer)
-                await msg.edit("已在Lyosu生成并保存语录, 正在上传中...")
-                await msg.reply_document('Quotly.webp',force_document=False,reply_to_message_id=reply.id)
-                await delete_this(msg)
-            except:
-                await msg.edit("请求成功但出现错误")
-                await asyncio.sleep(3)
-                await delete_this(msg)
-                return 
+        
+    await message.edit('等待Lyosu语录生成返回结果...')
+    response = await session.post(QUOTLY_API, json=json_data)
+    req = response.json()
+    if req['ok'] == True:
+        try:
+            buffer = base64.b64decode(req['result']['image'].encode('utf-8'))
+            open('Quotly.webp', 'wb').write(buffer)
+            await message.edit("已在Lyosu生成并保存语录, 正在上传中...")
+            await message.reply_document('Quotly.webp',force_document=False,reply_to_message_id=replied_msg.id)
+            await message.delete()
+            return
+        except:
+            await message.edit("请求成功但出现错误❗️")
+            await asyncio.sleep(3)
+            await message.delete()
             return
     else:
-        await msg.edit("错误，请使用帮助命令显示用例")
+        await message.edit_text(f"请求出现错误!")
         await asyncio.sleep(3)
-        await delete_this(msg)
-        return 
-
+        await message.delete()
 
 @Client.on_message(command('faq'))
-async def fake_quote(_: Client, msg: Message):
+async def fake_quote(_: Client, message: Message):
+    
+    
+    #判断参数数量是否正确
+    command_len = len(message.command)
+    if command_len != 2:
+        await message.edit_text("参数错误,使用前请查看help.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
+    #判断是否回复了一条消息
+    replied_msg = message.reply_to_message
+    if replied_msg == None:
+        await message.edit_text("请回复一条消息.")
+        await asyncio.sleep(3)
+        return await message.delete()
+    
+    session = await get_session()
+    
     json_data = {
         "type": "quote",
         "format": "png",
@@ -189,51 +175,41 @@ async def fake_quote(_: Client, msg: Message):
         "scale": 2.5,
         "messages": []
     }
-    cmd, opt = Parameters.get_more(msg)
-    # 检测是否回复一条消息
-    if not await check_replied_msg(msg, cmd):
-        return
-    # 无参数则默认为当前回复的消息
-    if not opt:
-        await msg.edit("未指定内容, 无法生成")
-        await asyncio.sleep(3)
-        await delete_this(msg)
-        return 
-    else:
-        reply = msg.reply_to_message
+    
+    #将本条消息加入转换队列
+    replied_msg = message.reply_to_message
+    sid, title ,name = await forward_info(replied_msg)
+    messages_json = {
+        "entities": [],
+        "avatar": True,
+        "from": {
+            "id": sid,
+            "language_code": "zh",
+            "title": title,
+            "name": name
+        },
+        "text": message.command[1]
+    }
+    # 将要转成图片的消息加到消息列表里
+    json_data["messages"].append(messages_json)
 
-        sid, title ,name = await forward_info(reply)
-        messages_json = {
-            "entities": [],
-            "avatar": True,
-            "from": {
-                "id": sid,
-                "language_code": "zh",
-                "title": title,
-                "name": name
-            },
-            "text": opt[0]
-        }
-        # Add the new message to the 'messages' array
-        json_data["messages"].append(messages_json)
-
-        # Convert the updated data back to JSON
-        # updated_json = json.dumps(json_data, indent=4)
-
-        await msg.edit('等待Lyosu语录生成返回结果...')
-        req = requests.post(QUOTLY_API, json=json_data).json()
-        if req['ok'] == True:
-            try:
-                buffer = base64.b64decode(req['result']['image'].encode('utf-8'))
-                open('Quotly.webp', 'wb').write(buffer)
-                await msg.edit("已在Lyosu生成并保存语录, 正在上传中...")
-                await msg.reply_document('Quotly.webp',force_document=False,reply_to_message_id=reply.id)
-                await delete_this(msg)
-            except:
-                await msg.edit("请求成功但出现错误")
-                await asyncio.sleep(3)
-                await delete_this(msg)
-                return 
+    await message.edit('等待Lyosu语录生成返回结果...')
+    response = await session.post(QUOTLY_API, json=json_data)
+    req = response.json()
+    if req['ok'] == True:
+        try:
+            buffer = base64.b64decode(req['result']['image'].encode('utf-8'))
+            open('Quotly.webp', 'wb').write(buffer)
+            await message.edit("已在Lyosu生成并保存语录, 正在上传中...")
+            await message.reply_document('Quotly.webp',force_document=False,reply_to_message_id=replied_msg.id)
+            await message.delete()
             return
-        else:
-            await msg.edit("请求出现错误")
+        except:
+            await message.edit("请求成功但出现错误❗️")
+            await asyncio.sleep(3)
+            await message.delete()
+            return
+    else:
+        await message.edit_text(f"请求出现错误!")
+        await asyncio.sleep(3)
+        await message.delete()

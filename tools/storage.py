@@ -1,76 +1,51 @@
 import asyncio
 import pickle
-from os import mkdir, path
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional
+from loguru import logger
 
-
+"""
+一个简单的文件存储系统.
+"""
 class SimpleStore:
-    """简单的存一些东西，凑合用用"""
 
-    def __init__(
-        self,
-        file_name: str = './data/app.pickle',
-        auto_flush: bool = True
-    ) -> None:
-        self.__lock = asyncio.Lock()
-        self.__file_name = file_name
-        self.__auto_flush = auto_flush
-
-        try:
-            self.__store = pickle.load(open(file_name, 'rb'), encoding='utf-8')
-        except EOFError:
-            self.__store = {}
-        except FileNotFoundError:
-            self.__store = {}
-            if not path.exists("./data"):
-                mkdir('./data')
-            pickle.dump({}, open(file_name, 'wb'))
-        except Exception as e:
-            raise e
+    def __init__(self, file_name: str = './data/app.pickle', auto_flush: bool = True) -> None:
+        self._lock = asyncio.Lock()
+        self._file_path = Path(file_name)
+        self._auto_flush = auto_flush
+        self._store = self._load_store()
 
     async def __aenter__(self):
-        await self.__lock.acquire()
+        await self._lock.acquire()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.__auto_flush:
+        if self._auto_flush:
             self.flush()
+        self._lock.release()
 
-        if self.__lock.locked():
-            self.__lock.release()
-
-    def get_lock(self) -> asyncio.Lock:
-        return self.__lock
-
-    @property
-    def data(self) -> Dict[str, Any]:
-        return self.__store
-
-    def get_data(self, key: Any) -> Dict:  # , typed: Any
-        if self.__store.get(key):
-            return self.__store[key]
+    def _load_store(self) -> Dict[str, Any]:
+        if self._file_path.exists():
+            try:
+                with self._file_path.open('rb') as file:
+                    return pickle.load(file)
+            except Exception as e:
+                logger.error(f"加载存储失败: {e}")
+            return {}
         else:
-            self.__store[key] = {}
-            return self.__store[key]
+            self._file_path.parent.mkdir(parents=True, exist_ok=True)
+            return {}
 
-    # def update(self, data: Dict):
-    #     return self.__store.update(data)
+    def get_data(self, key: str) -> Dict:
+        return self._store.setdefault(key, None)
+    
+    def set_data(self, key: Any, value: Any):
+        self._store[key] = value
 
-    # def clear(self) -> Dict:
-    #     self.__store.clear()
-
-    # def getter(self, key: Any) -> Any:
-    #     return self.__store.get(key)
-
-    # def setter(self, key: Any, value: Any) -> None:
-    #     self.__store[key] = value
-
-    # def deleter(self, key: Any) -> Optional[Any]:
-    #     return self.__store.pop(key, None)
+    def deleter(self, key: Any) -> Optional[Any]:
+        return self._store.pop(key, None)
 
     def flush(self):
-        """更新数据并持久化到pickle文件"""
-        pickle.dump(self.__store, open(self.__file_name, 'wb'))
-
-
-# storage = SimpleStorage('./data/app.pickle')
+        """更新数据并持久化到pickle文件."""
+        with self._file_path.open('wb') as file:
+            pickle.dump(self._store, file)

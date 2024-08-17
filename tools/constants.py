@@ -20,18 +20,6 @@ UPDATE_CMD: str = "docker run --rm " \
 # ------------- Load --------------
 DOWNLOAD_PATH: str = './data/download/'
 
-# ------------- rate --------------
-RATE_API: str = 'https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies'
-HTTP_HEADERS: Dict[str, str] = {
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/76.0.3809.132 Safari/537.36"
-}
-
-# ------------- speedtest --------------
-SPEEDTEST_PATH_FILE: str = './data/speedtest'
-SPEEDTEST_URL: str = "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-$(uname -m).tgz"
-INSTALL_SPEEDTEST: str = f"""wget -qO- "{SPEEDTEST_URL}" | tar zx -C ./data speedtest"""
-SPEEDTEST_RUN: str = f'{SPEEDTEST_PATH_FILE} --accept-license --accept-gdpr -f json'
 
 # ------------- sticker --------------
 # STICKER_BOT: int = 429000
@@ -51,23 +39,6 @@ STICKER_ERROR_LIST: List[str] = [
     INVALID_SET_NAME,
 ]
 
-# ------------- cc & trace --------------
-REACTIONS= ['👍', '👎', '❤️', '🔥', '🥰', '👏',
-                        '😁', '🤔', '🤯', '😱', '🤬', '😢',
-                        '🎉', '🤩', '🤮', '💩']
-CC_MAX_TIMES: int = 233
-
-# ------------- ghost --------------
-GHOST_INTERVAL: float = 1.5
-
-# ------------- other --------------
-TG_GROUP: str = 'group'
-TG_SUPERGROUP: str = 'supergroup'
-TG_CHANNEL: str = 'channel'
-TG_BOT: str = 'bot'
-TG_PRIVATE: str = 'private'
-TG_GROUPS: List[str] = ['group', 'supergroup']
-
 # ------------- Store -------------
 STORE_CC_DATA: str = 'data:cc'
 STORE_NOTES_DATA: str = 'data:notes'
@@ -75,5 +46,3 @@ STORE_TRACE_DATA: str = 'data:trace'
 STORE_GHOST_DATA: str = 'data:ghost'
 STORE_GHOST_CACHE: str = 'cache:ghost'
 
-# ------------- Quotly -------------
-QUOTLY_API: str = 'https://bot.lyo.su/quote/generate'
